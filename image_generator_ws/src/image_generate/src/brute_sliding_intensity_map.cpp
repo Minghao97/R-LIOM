@@ -2,7 +2,8 @@
 
 #include <Eigen/Dense>
 #include <Eigen/SVD>
-#include "cxcore.h"
+#include <opencv2/core.hpp>
+
 
 #include <sensor_msgs/Image.h>
 #include <cv_bridge/cv_bridge.h>
@@ -159,18 +160,18 @@ void _project(PointCloudPtrType& ptr, VirtualCam& virtualCam, int idx, TimeType 
         return lhs.x*lhs.x + lhs.y*lhs.y + lhs.z*lhs.z > rhs.x*rhs.x + rhs.y*rhs.y + rhs.z*rhs.z;
     });
 
-    for (uint i = 0; i < ptr->points.size(); ++i) {
-        float x = -ptr->points[i].y,
-              y = -ptr->points[i].z,
-              z =  ptr->points[i].x;
+    for (auto & point : ptr->points) {
+        float x = -point.y,
+              y = -point.z,
+              z =  point.x;
         bool f = false;
         int u, v;
         virtualCam.project(x, y, z, u, v, f);
 
         if (f) {
             virtualCam.maxIntensity = 155;
-            if (ptr->points[i].intensity > 155) {
-                ptr->points[i].intensity = 155;
+            if (point.intensity > 155) {
+                point.intensity = 155;
             };
 
             int &cnt = imgCount[v][u];
@@ -188,18 +189,18 @@ void _project(PointCloudPtrType& ptr, VirtualCam& virtualCam, int idx, TimeType 
                         cnt = 1;
                         imgDis[v][u] = nowDis;
 
-                        oldVal = uchar(ptr->points[i].intensity / virtualCam.maxIntensity * 255);
+                        oldVal = uchar(point.intensity / virtualCam.maxIntensity * 255);
                     }
                 } else {
                     // getAvg;
                     imgDis[v][u] = (imgDis[v][u] * cnt + nowDis) / (cnt + 1);
-                    oldVal = uchar( (double(oldVal) * cnt + ptr->points[i].intensity / virtualCam.maxIntensity * 255) / (cnt+1));
+                    oldVal = uchar( (double(oldVal) * cnt + point.intensity / virtualCam.maxIntensity * 255) / (cnt+1));
                     ++cnt;
                 }
             } else {
                 double nowDis = std::sqrt(x*x + y*y + z*z);
                 cnt = 1;
-                oldVal = uchar(ptr->points[i].intensity / virtualCam.maxIntensity * 255);
+                oldVal = uchar(point.intensity / virtualCam.maxIntensity * 255);
                 imgDis[v][u] = nowDis;
             }
         } 
@@ -237,15 +238,61 @@ void _project(PointCloudPtrType& ptr, VirtualCam& virtualCam, int idx, TimeType 
     // notFillRate = (notFillRateCnt*notFillRate + rateCnt) / (notFillRateCnt + 1);
     // notFillRateCnt++;
     
-    if (true) {
-        cv::Mat result_img;
-        result_img = img;
-        cv::inpaint(img, imgMask, result_img, 3, cv::INPAINT_TELEA);
+    // if (true) {
+    //     cv::Mat result_img;
+    //     result_img = img;
+    //     cv::inpaint(img, imgMask, result_img, 3, cv::INPAINT_TELEA);
+    //     if (saveImg) {
+    //         cv::imwrite(imgSavePath, img);
+    //         cv::imwrite(inpaintSavePath, result_img);
+    //     }
+    // }
+    try {
+        // 检查 img 类型，如果不是 CV_8UC1 或 CV_8UC3，强制转换为灰度图
+        if (img.type() != CV_8UC1 && img.type() != CV_8UC3) {
+            // img convert to cv8uc1
+            img.convertTo(img, CV_8UC1);
+        }
+
+        // 检查 imgMask 类型，确保是单通道 8 位图像
+        if (imgMask.type() != CV_8UC1) {
+            // imgmask convert to cv8uc1
+            imgMask.convertTo(imgMask, CV_8UC1);
+        }
+
+        // 确保 img 和 imgMask 尺寸一致
+        if (img.size() != imgMask.size()) {
+            std::cerr << "Error: img and imgMask must have the same size." << std::endl;
+            return;
+        }
+
+        // 强制掩码为二值图像（0 和 255）
+        cv::threshold(imgMask, imgMask, 1, 255, cv::THRESH_BINARY);
+
+        // 深拷贝 img
+        cv::Mat result_img = img.clone();
+        try
+        {
+            cv::inpaint(img, imgMask, result_img, 3, cv::INPAINT_TELEA);
+        } catch (cv::Exception& e)
+        {
+            std::cerr << "Exception inpaint: " << e.what() << std::endl;
+        }
+        // 执行 inpaint 操作
+
+
+        // 保存图像（如果需要）
         if (saveImg) {
             cv::imwrite(imgSavePath, img);
             cv::imwrite(inpaintSavePath, result_img);
         }
+
+    } catch (const cv::Exception& e) {
+        std::cerr << "OpenCV error: " << e.what() << std::endl;
     }
+
+
+
 
     // publish
 }
@@ -394,7 +441,13 @@ int main(int argc, char** argv) {
     subOdom = nh.subscribe("/Odometry", 100000, odomCallBack);
     subPointCloud = nh.subscribe("/cloud_registered_body", 100000, pointCloudCallBack);
 
-    cv::FileStorage fs("/home/mason/fox/projects/slam/image_generator_ws/src/image_generate/cfg/virtualCamParam.yaml", cv::FileStorage::READ);
+    cv::FileStorage fs("/home/slamasus/ws_rliom/src/R-LIOM/image_generator_ws/src/image_generate/cfg/virtualCamParam.yaml", cv::FileStorage::READ);
+    // 检查文件是否成功打开
+    if (!fs.isOpened()) {
+        std::cerr << "Error: Unable to open the file, check the path of yaml" << std::endl;
+        return 0;
+    }
+
     int height, width;
     float fx, fy, cx, cy;
     fs["height"] >> height;
@@ -409,7 +462,9 @@ int main(int argc, char** argv) {
     fs["distance_threshold"] >> distance_threshold;
     fs["img_save_path"] >> prefixImgSavePath;
     fs["inpaint_save_path"] >> prefixInpaintSavePath;
-
+    // cout paths
+    std::cout<<"inpaint_save_path"<<prefixInpaintSavePath<<std::endl;
+    std::cout<<"img_save_path"<<prefixImgSavePath<<std::endl;
     exit_flag = false;
     signal(SIGINT, SigHandle);
 

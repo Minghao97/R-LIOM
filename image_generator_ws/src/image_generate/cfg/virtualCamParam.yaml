@@ -12,5 +12,5 @@ distance_threshold: 0.001
 pointThreshLower: 0.1
 pointThreshUpper: 40
 
-img_save_path: "/home/mason/fox/projects/slam/image_generator_ws/src/image_generate/saved/imgs/"
-inpaint_save_path: "/home/mason/fox/projects/slam/image_generator_ws/src/image_generate/saved/inpaint/"
+img_save_path: "/home/slamasus/ws_rliom/result/"
+inpaint_save_path: "/home/slamasus/ws_rliom/inpaint/"
